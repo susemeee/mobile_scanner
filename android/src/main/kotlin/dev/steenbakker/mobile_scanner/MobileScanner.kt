@@ -431,7 +431,8 @@ class MobileScanner(
                 .build()
 
             // Apply Camera2 quality settings for external cameras
-            val camera2InteropPreview = Camera2Interop.Extender(Preview.Builder())
+            val previewBuilder = Preview.Builder()
+            Camera2Interop.Extender(previewBuilder)
                 .setCaptureRequestOption(
                     android.hardware.camera2.CaptureRequest.CONTROL_MODE,
                     android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO
@@ -441,12 +442,12 @@ class MobileScanner(
                     100 // Maximum JPEG quality
                 )
 
-            val previewBuilder = camera2InteropPreview
-                .setResolutionSelector(resolutionSelector)
+            previewBuilder.setResolutionSelector(resolutionSelector)
             preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
             // Build the analyzer to be passed on to MLKit with quality settings
-            val camera2InteropAnalysis = Camera2Interop.Extender(ImageAnalysis.Builder())
+            val analysisBuilder = ImageAnalysis.Builder()
+            Camera2Interop.Extender(analysisBuilder)
                 .setCaptureRequestOption(
                     android.hardware.camera2.CaptureRequest.CONTROL_MODE,
                     android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO
@@ -464,7 +465,7 @@ class MobileScanner(
                     android.hardware.camera2.CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
                 )
 
-            val analysisBuilder = camera2InteropAnalysis
+            analysisBuilder
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setResolutionSelector(resolutionSelector)

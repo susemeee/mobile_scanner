@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Handler
@@ -13,6 +16,7 @@ import android.util.Size
 import android.view.Surface
 import androidx.annotation.VisibleForTesting
 import androidx.camera.camera2.Camera2Config
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -87,7 +91,42 @@ class MobileScanner(
     private var returnImage = false
     private var isPaused = false
 
+    /**
+     * Find the optimal resolution for external cameras.
+     *
+     * For external cameras, if 1280x1024 is available and there's no higher resolution,
+     * use 1280x1024 for better QR code scanning quality.
+     */
+    private fun findOptimalExternalCameraResolution(): Size? {
+        try {
+            val cameraManager = activity.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+
+            // Find external camera(s)
+            for (cameraId in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+                val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+
+                if (lensFacing == CameraCharacteristics.LENS_FACING_EXTERNAL) {
+                    val result = getOptimalResolutionForExternalCamera(activity, cameraId)
+                    if (result != null) {
+                        return result
+                    }
+                }
+            }
+
+            return null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding optimal external camera resolution", e)
+            return null
+        }
+    }
+
     companion object {
+        private const val TAG = "MobileScanner"
+
+        // Target resolution for external cameras with limited high-res support
+        private val EXTERNAL_CAMERA_PREFERRED_RESOLUTION = Size(1280, 1024)
+
         // Configure the `ProcessCameraProvider` to only log errors.
         // This prevents the informational log spam from CameraX.
         private fun configureCameraProcessProvider() {
@@ -107,6 +146,82 @@ class MobileScanner(
          */
         fun defaultBarcodeScannerFactory(options: BarcodeScannerOptions?) : BarcodeScanner {
             return if (options == null) BarcodeScanning.getClient() else BarcodeScanning.getClient(options)
+        }
+
+        /**
+         * Determine the optimal resolution for an external camera.
+         *
+         * For external cameras, if 1280x1024 is available and there's no higher resolution,
+         * prefer 1280x1024 for better QR code scanning quality.
+         *
+         * @param context The application context
+         * @param cameraId The camera ID to check
+         * @return The optimal resolution, or null to use default
+         */
+        fun getOptimalResolutionForExternalCamera(context: Context, cameraId: String): Size? {
+            try {
+                val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+
+                // Check if this is an external camera
+                val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (lensFacing != CameraCharacteristics.LENS_FACING_EXTERNAL) {
+                    return null
+                }
+
+                // Get available resolutions
+                val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    ?: return null
+                val outputSizes = map.getOutputSizes(SurfaceTexture::class.java)
+                    ?: return null
+
+                // Sort by pixel count (descending)
+                val sortedSizes = outputSizes.sortedByDescending { it.width * it.height }
+
+                Log.d(TAG, "External camera $cameraId available resolutions: ${sortedSizes.map { "${it.width}x${it.height}" }}")
+
+                // Check if 1280x1024 exists
+                val targetSize = sortedSizes.find {
+                    it.width == EXTERNAL_CAMERA_PREFERRED_RESOLUTION.width &&
+                    it.height == EXTERNAL_CAMERA_PREFERRED_RESOLUTION.height
+                }
+
+                if (targetSize == null) {
+                    Log.d(TAG, "External camera $cameraId: 1280x1024 not available")
+                    return null
+                }
+
+                // Check if there's a higher resolution than 1280x1024
+                val targetPixels = EXTERNAL_CAMERA_PREFERRED_RESOLUTION.width * EXTERNAL_CAMERA_PREFERRED_RESOLUTION.height
+                val hasHigherResolution = sortedSizes.any {
+                    it.width * it.height > targetPixels
+                }
+
+                if (hasHigherResolution) {
+                    Log.d(TAG, "External camera $cameraId: Higher resolution available, using default")
+                    return null
+                }
+
+                Log.d(TAG, "External camera $cameraId: Using optimal resolution 1280x1024 (no higher resolution available)")
+                return EXTERNAL_CAMERA_PREFERRED_RESOLUTION
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking external camera resolution", e)
+                return null
+            }
+        }
+
+        /**
+         * Get Camera2 camera ID from CameraX CameraInfo
+         */
+        @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+        fun getCameraIdFromCameraInfo(camera: Camera?): String? {
+            return try {
+                camera?.cameraInfo?.let { Camera2CameraInfo.from(it).cameraId }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting camera ID from CameraInfo", e)
+                null
+            }
         }
     }
 
@@ -418,8 +533,29 @@ class MobileScanner(
             // Preview
 
             // Build the preview to be shown on the Flutter texture
-            // Use a higher default resolution for external cameras (4K)
-            val cameraResolution = cameraResolutionWanted ?: Size(3840, 2160)
+            // Determine optimal resolution based on camera type
+            val cameraResolution: Size = if (cameraResolutionWanted != null) {
+                // User specified resolution, use it
+                cameraResolutionWanted
+            } else {
+                // Check if this is an external camera and determine optimal resolution
+                val isExternalCamera = cameraPosition.lensFacing == CameraSelector.LENS_FACING_EXTERNAL
+
+                if (isExternalCamera) {
+                    // Find external camera ID and check for optimal resolution
+                    val optimalResolution = findOptimalExternalCameraResolution()
+                    if (optimalResolution != null) {
+                        Log.d(TAG, "Using optimal resolution for external camera: ${optimalResolution.width}x${optimalResolution.height}")
+                        optimalResolution
+                    } else {
+                        // Default for external cameras (4K)
+                        Size(3840, 2160)
+                    }
+                } else {
+                    // Default for internal cameras (4K)
+                    Size(3840, 2160)
+                }
+            }
 
             val resolutionSelector = ResolutionSelector.Builder()
                 .setResolutionStrategy(

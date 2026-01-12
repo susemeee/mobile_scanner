@@ -13,6 +13,7 @@ import android.util.Size
 import android.view.Surface
 import androidx.annotation.VisibleForTesting
 import androidx.camera.camera2.Camera2Config
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraXConfig
@@ -417,25 +418,58 @@ class MobileScanner(
             // Preview
 
             // Build the preview to be shown on the Flutter texture
-            val previewBuilder = Preview.Builder()
+            // Use a higher default resolution for external cameras (4K)
+            val cameraResolution = cameraResolutionWanted ?: Size(3840, 2160)
+
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        cameraResolution,
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                    )
+                )
+                .build()
+
+            // Apply Camera2 quality settings for external cameras
+            val camera2InteropPreview = Camera2Interop.Extender(Preview.Builder())
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.CONTROL_MODE,
+                    android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO
+                )
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.JPEG_QUALITY,
+                    100 // Maximum JPEG quality
+                )
+
+            val previewBuilder = camera2InteropPreview
+                .setResolutionSelector(resolutionSelector)
             preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
-            // Build the analyzer to be passed on to MLKit
-            val analysisBuilder = ImageAnalysis.Builder()
+            // Build the analyzer to be passed on to MLKit with quality settings
+            val camera2InteropAnalysis = Camera2Interop.Extender(ImageAnalysis.Builder())
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.CONTROL_MODE,
+                    android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO
+                )
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.EDGE_MODE,
+                    android.hardware.camera2.CameraMetadata.EDGE_MODE_HIGH_QUALITY
+                )
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.NOISE_REDUCTION_MODE,
+                    android.hardware.camera2.CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                )
+                .setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_ABERRATION_MODE,
+                    android.hardware.camera2.CameraMetadata.COLOR_CORRECTION_ABERRATION_MODE_HIGH_QUALITY
+                )
+
+            val analysisBuilder = camera2InteropAnalysis
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                .setResolutionSelector(resolutionSelector)
+
             val displayManager = activity.applicationContext.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-
-            val cameraResolution =  cameraResolutionWanted ?: Size(1920, 1080)
-
-            val selectorBuilder = ResolutionSelector.Builder()
-            selectorBuilder.setResolutionStrategy(
-                ResolutionStrategy(
-                    cameraResolution,
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                )
-            )
-            analysisBuilder.setResolutionSelector(selectorBuilder.build()).build()
 
             if (displayListener == null) {
                 displayListener = object : DisplayManager.DisplayListener {
@@ -444,13 +478,7 @@ class MobileScanner(
                     override fun onDisplayRemoved(displayId: Int) {}
 
                     override fun onDisplayChanged(displayId: Int) {
-                        val selector = ResolutionSelector.Builder().setResolutionStrategy(
-                            ResolutionStrategy(
-                                cameraResolution,
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                            )
-                        )
-                        analysisBuilder.setResolutionSelector(selector.build()).build()
+                        // Display changed, resolution selector is already applied
                     }
                 }
 

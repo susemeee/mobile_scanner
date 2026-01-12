@@ -177,8 +177,14 @@ class MobileScannerHandler(
 
         val barcodeScannerOptions: BarcodeScannerOptions? = buildBarcodeScannerOptions(formats, autoZoom)
 
-        val position =
-            if (facing == 0) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
+        val position = when (facing) {
+            0 -> CameraSelector.DEFAULT_FRONT_CAMERA
+            1 -> CameraSelector.DEFAULT_BACK_CAMERA
+            2 -> CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_EXTERNAL)
+                .build()
+            else -> CameraSelector.DEFAULT_BACK_CAMERA
+        }
 
         val detectionSpeed: DetectionSpeed = when (speed) {
             0 -> DetectionSpeed.NO_DUPLICATES

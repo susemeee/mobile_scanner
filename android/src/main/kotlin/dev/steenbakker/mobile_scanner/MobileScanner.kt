@@ -33,6 +33,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.SurfaceRequest
 import androidx.camera.core.TorchState
+import androidx.camera.core.resolutionselector.ResolutionFilter
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -557,11 +558,33 @@ class MobileScanner(
                 }
             }
 
+            // Create resolution filter to prioritize exact match for non-standard aspect ratios
+            val resolutionFilter = ResolutionFilter { supportedSizes, _ ->
+                // Check if requested resolution exists in supported sizes
+                val exactMatch = supportedSizes.find {
+                    it.width == cameraResolution.width && it.height == cameraResolution.height
+                }
+
+                if (exactMatch != null) {
+                    // Prioritize exact match first, then others sorted by pixel count
+                    Log.d(TAG, "Resolution filter: Exact match found for ${cameraResolution.width}x${cameraResolution.height}")
+                    listOf(exactMatch) + supportedSizes.filter { it != exactMatch }
+                        .sortedByDescending { it.width * it.height }
+                } else {
+                    // No exact match, sort by closest to requested resolution
+                    Log.d(TAG, "Resolution filter: No exact match for ${cameraResolution.width}x${cameraResolution.height}, using closest")
+                    supportedSizes.sortedBy {
+                        kotlin.math.abs(it.width * it.height - cameraResolution.width * cameraResolution.height)
+                    }
+                }
+            }
+
             val resolutionSelector = ResolutionSelector.Builder()
+                .setResolutionFilter(resolutionFilter)
                 .setResolutionStrategy(
                     ResolutionStrategy(
                         cameraResolution,
-                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        ResolutionStrategy.FALLBACK_RULE_NONE  // Don't fallback, use filter result
                     )
                 )
                 .build()

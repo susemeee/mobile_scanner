@@ -558,35 +558,30 @@ class MobileScanner(
                 }
             }
 
-            // Create resolution filter to prioritize exact match for non-standard aspect ratios
+            // Create resolution filter to prioritize exact match for non-standard aspect ratios (like 5:4)
             val resolutionFilter = ResolutionFilter { supportedSizes, _ ->
+                Log.d(TAG, "Resolution filter: supported sizes = ${supportedSizes.map { "${it.width}x${it.height}" }}")
+
                 // Check if requested resolution exists in supported sizes
                 val exactMatch = supportedSizes.find {
                     it.width == cameraResolution.width && it.height == cameraResolution.height
                 }
 
                 if (exactMatch != null) {
-                    // Prioritize exact match first, then others sorted by pixel count
+                    // Prioritize exact match first, then others sorted by pixel count (descending)
                     Log.d(TAG, "Resolution filter: Exact match found for ${cameraResolution.width}x${cameraResolution.height}")
-                    listOf(exactMatch) + supportedSizes.filter { it != exactMatch }
-                        .sortedByDescending { it.width * it.height }
+                    val result = mutableListOf(exactMatch)
+                    result.addAll(supportedSizes.filter { it != exactMatch }.sortedByDescending { it.width * it.height })
+                    result
                 } else {
-                    // No exact match, sort by closest to requested resolution
-                    Log.d(TAG, "Resolution filter: No exact match for ${cameraResolution.width}x${cameraResolution.height}, using closest")
-                    supportedSizes.sortedBy {
-                        kotlin.math.abs(it.width * it.height - cameraResolution.width * cameraResolution.height)
-                    }
+                    // No exact match, sort by pixel count (highest first)
+                    Log.d(TAG, "Resolution filter: No exact match for ${cameraResolution.width}x${cameraResolution.height}")
+                    supportedSizes.sortedByDescending { it.width * it.height }
                 }
             }
 
             val resolutionSelector = ResolutionSelector.Builder()
                 .setResolutionFilter(resolutionFilter)
-                .setResolutionStrategy(
-                    ResolutionStrategy(
-                        cameraResolution,
-                        ResolutionStrategy.FALLBACK_RULE_NONE  // Don't fallback, use filter result
-                    )
-                )
                 .build()
 
             // Apply Camera2 quality settings for external cameras

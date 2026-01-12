@@ -673,6 +673,14 @@ class MobileScanner(
             }
 
             val resolution = analysis.resolutionInfo!!.resolution
+            val previewResolution = preview?.resolutionInfo?.resolution
+
+            Log.d(TAG, "=== ACTUAL RESOLUTION USED ===")
+            Log.d(TAG, "Requested resolution: ${cameraResolution.width}x${cameraResolution.height}")
+            Log.d(TAG, "Actual ImageAnalysis resolution: ${resolution.width}x${resolution.height}")
+            Log.d(TAG, "Actual Preview resolution: ${previewResolution?.width}x${previewResolution?.height}")
+            Log.d(TAG, "==============================")
+
             val width = resolution.width.toDouble()
             val height = resolution.height.toDouble()
             val sensorRotationDegrees = camera?.cameraInfo?.sensorRotationDegrees ?: 0
